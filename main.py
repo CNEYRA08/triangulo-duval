@@ -271,12 +271,19 @@ def plot_duval_triangle(ch4_p, c2h4_p, c2h2_p, fault_code):
         Z_zona = np.where(mask, 1.0, np.nan)
         ax.contourf(X, Y, Z_zona, levels=[0.5, 1.5], colors=[colores[zona]], alpha=0.6)
 
-    # Etiquetas de zonas
-    etiquetas_pos = [
-        (0.5, 0.99, "PD"), (0.15, 0.75, "T1"), (0.55, 0.35, "T2"),
-        (0.78, 0.15, "T3"), (0.12, 0.35, "D1"), (0.45, 0.55, "D2"), (0.62, 0.25, "DT"),
+    # Etiquetas de zonas: puntos interiores en % (ch4, c2h4, c2h2) convertidos con tern2cart
+    # para que queden sobre la región correspondiente
+    etiquetas_tern = [
+        (99, 0.5, 0.5, "PD"),   # PD: CH4 >= 98
+        (87, 10, 3, "T1"),      # T1: C2H2<4, C2H4<20
+        (60, 35, 2, "T2"),      # T2: C2H2<4, 20<=C2H4<50
+        (25, 65, 10, "T3"),     # T3: C2H2<15, C2H4>=50
+        (50, 15, 35, "D1"),     # D1: C2H2>=13, C2H4<23
+        (25, 35, 40, "D2"),     # D2: C2H4>=23, C2H2>=13
+        (40, 35, 25, "DT"),     # DT: zona central
     ]
-    for x, y, texto in etiquetas_pos:
+    for ch4, c2h4, c2h2, texto in etiquetas_tern:
+        x, y = tern2cart(ch4, c2h4, c2h2)
         ax.text(x, y, texto, fontsize=9, fontweight="bold", ha="center", va="center", color="#444")
 
     # Punto del usuario
