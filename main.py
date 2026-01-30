@@ -3,6 +3,8 @@ import pandas as pd
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+import matplotlib.lines as mlines
 import numpy as np
 import io
 
@@ -202,7 +204,7 @@ def plot_duval_triangle(ch4_p, c2h4_p, c2h2_p, fault_code):
     Genera el triángulo de Duval según Figura 3 y Tabla 6.
     Vértices: CH4 (arriba), C2H4 (abajo derecha), C2H2 (abajo izquierda).
     """
-    fig, ax = plt.subplots(figsize=(8, 7))
+    fig, ax = plt.subplots(figsize=(9, 7))
 
     # Vértices: (0,0)=C2H2, (1,0)=C2H4, (0.5,1)=CH4
     verts = np.array([[0, 0], [1, 0], [0.5, 1], [0, 0]])
@@ -271,24 +273,22 @@ def plot_duval_triangle(ch4_p, c2h4_p, c2h2_p, fault_code):
         Z_zona = np.where(mask, 1.0, np.nan)
         ax.contourf(X, Y, Z_zona, levels=[0.5, 1.5], colors=[colores[zona]], alpha=0.6)
 
-    # Etiquetas de zonas: puntos interiores en % (ch4, c2h4, c2h2) convertidos con tern2cart
-    # para que queden sobre la región correspondiente
-    etiquetas_tern = [
-        (99, 0.5, 0.5, "PD"),   # PD: CH4 >= 98
-        (87, 10, 3, "T1"),      # T1: C2H2<4, C2H4<20
-        (60, 35, 2, "T2"),      # T2: C2H2<4, 20<=C2H4<50
-        (25, 65, 10, "T3"),     # T3: C2H2<15, C2H4>=50
-        (50, 15, 35, "D1"),     # D1: C2H2>=13, C2H4<23
-        (25, 35, 40, "D2"),     # D2: C2H4>=23, C2H2>=13
-        (40, 35, 25, "DT"),     # DT: zona central
+    # Leyenda: código de falla ↔ color (sin etiquetas sobre el gráfico)
+    legend_elements = [
+        mpatches.Patch(facecolor=colores[z], alpha=0.6, edgecolor="gray", label=z)
+        for z in zonas
     ]
-    for ch4, c2h4, c2h2, texto in etiquetas_tern:
-        x, y = tern2cart(ch4, c2h4, c2h2)
-        ax.text(x, y, texto, fontsize=9, fontweight="bold", ha="center", va="center", color="#444")
+    legend_elements.append(
+        mlines.Line2D(
+            [0], [0], marker="*", color="w", markeredgecolor="black",
+            markerfacecolor="red", markersize=14, linestyle="None", label="Punto actual"
+        )
+    )
+    ax.legend(handles=legend_elements, loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
 
     # Punto del usuario
     user_x, user_y = tern2cart(ch4_p, c2h4_p, c2h2_p)
-    ax.plot(user_x, user_y, marker="*", markersize=18, color="red", markeredgecolor="black", label="Punto actual")
+    ax.plot(user_x, user_y, marker="*", markersize=18, color="red", markeredgecolor="black", zorder=5)
 
     # Etiquetas de ejes
     ax.text(0.5, 1.05, "% CH₄", fontsize=10, ha="center")
@@ -299,6 +299,7 @@ def plot_duval_triangle(ch4_p, c2h4_p, c2h2_p, fault_code):
     ax.set_ylim(-0.08, 1.08)
     ax.set_aspect("equal")
     ax.axis("off")
+    plt.tight_layout()
     return fig
 
 # --- INTERFAZ DE USUARIO ---
