@@ -12,7 +12,7 @@ import io
 st.set_page_config(page_title="Voltium | DGA Duval", layout="wide")
 
 # Título y Branding
-st.title("⚡ Simulador de Diagnóstico DGA - Triángulo de Duval")
+st.title("⚡ Simulador de Diagnóstico DGA - Duval (Triángulos y Pentágonos)")
 st.markdown(
     "<div style='text-align:right; font-weight:bold; color:#00AEEF; letter-spacing:4px;'>VOLTIUM</div>",
     unsafe_allow_html=True,
@@ -61,6 +61,38 @@ def segmento_ternario(constante, tipo, valor):
         c2h4 = restante - ch4
         c2h2 = np.full_like(ch4, valor)
         return ch4, c2h4, c2h2
+    return [], [], []
+
+
+def segmento_ternario_t4(tipo, valor):
+    """Segmento en Triángulo 4: H2, CH4, C2H6. tipo = 'H2','CH4','C2H6'."""
+    restante = 100 - valor
+    if restante <= 0:
+        return [], [], []
+    u = np.linspace(1e-6, restante - 1e-6, 50)
+    v = restante - u
+    if tipo == "H2":
+        return np.full_like(u, valor), u, v
+    if tipo == "CH4":
+        return u, np.full_like(u, valor), v
+    if tipo == "C2H6":
+        return u, v, np.full_like(u, valor)
+    return [], [], []
+
+
+def segmento_ternario_t5(tipo, valor):
+    """Segmento en Triángulo 5: CH4, C2H4, C2H6. tipo = 'CH4','C2H4','C2H6'."""
+    restante = 100 - valor
+    if restante <= 0:
+        return [], [], []
+    u = np.linspace(1e-6, restante - 1e-6, 50)
+    v = restante - u
+    if tipo == "CH4":
+        return np.full_like(u, valor), u, v
+    if tipo == "C2H4":
+        return u, np.full_like(u, valor), v
+    if tipo == "C2H6":
+        return u, v, np.full_like(u, valor)
     return [], [], []
 
 
@@ -184,7 +216,7 @@ def ieee_paso3_condicion(valores_ppm, p90, p95):
 
 
 def get_fault_details(code):
-    """Diccionario de interpretaciones técnicas."""
+    """Diccionario de interpretaciones técnicas (incluye sub-tipos Triángulo 4/5 y Pentágonos)."""
     details = {
         "PD": ("Descargas Parciales", "Descargas tipo corona, posibles vacíos en el aislamiento sólido o burbujas de gas en el aceite.", "Revisar nivel de aceite, buscar ruidos ultrasónicos."),
         "T1": ("Falla Térmica < 300°C", "Sobrecarga del papel o aceite, conexiones oxidadas pero de baja temperatura.", "Verificar historial de carga y estado del sistema de refrigeración."),
@@ -193,10 +225,265 @@ def get_fault_details(code):
         "D1": ("Descargas de Baja Energía", "Chispas (sparking), descargas continuas de baja corriente.", "Pruebas eléctricas (resistencia de aislamiento, TTR) recomendadas."),
         "D2": ("Descargas de Alta Energía", "Arcos eléctricos severos (arcing), cortocircuitos francos entre espiras o a tierra.", "CRÍTICO. Sacar de servicio si la tasa de generación es alta. Análisis de furanos."),
         "DT": ("Falla Térmica y Eléctrica", "Mezcla de fallas. Posible arco con punto caliente.", "Investigación profunda requerida."),
+        "S": ("Stray gassing", "Gaseado de aceite mineral a T < 200°C (inestabilidad química o incompatibilidad de materiales).", "Verificar tipo de aceite y pasivadores."),
+        "O": ("Sobrecalentamiento sin carbonización", "Sobrecalentamiento de papel o aceite < 250°C sin carbonización del papel.", "Revisar carga y ventilación."),
+        "C": ("Posible carbonización de papel", "Posible carbonización del papel; confirmar con óxidos de carbono y furanos.", "Análisis de furanos y CO/CO2 recomendado."),
+        "T3-H": ("Falla T3 solo en aceite", "Falla térmica > 700°C en aceite únicamente (sin papel).", "Menor preocupación que T3 con papel."),
+        "ND": ("No determinado", "Zona no determinada o no detectada.", "Combinar con Triángulo 1 u otros métodos."),
         "N/A": ("Sin datos suficientes", "Ingrese valores mayores a 0", "-"),
-        "Fuera (suma ≠ 100%)": ("Fuera del triángulo", "Los % de CH4, C2H4 y C2H2 deben sumar 100%.", "Verifique o normalice los valores."),
+        "Fuera (suma ≠ 100%)": ("Fuera del diagrama", "Los porcentajes deben sumar 100%.", "Verifique o normalice los valores."),
     }
     return details.get(code, ("Desconocido", "Zona no clasificada", "Revisar datos"))
+
+
+# --- TRIÁNGULO 4 (H2, CH4, C2H6) — IEEE Fig. D.3, Tabla D.3 ---
+def tern2cart_t4(h2, ch4, c2h6):
+    """Convierte % (H2, CH4, C2H6) a (x,y). 
+    H2=arriba (0.5,1), CH4=abajo derecha (1,0), C2H6=abajo izquierda (0,0)."""
+    h2, ch4, c2h6 = np.atleast_1d(h2), np.atleast_1d(ch4), np.atleast_1d(c2h6)
+    x = ch4 / 100 + h2 / 200
+    y = h2 / 100
+    return np.squeeze(x), np.squeeze(y)
+
+
+def clasificar_duval_triangulo4(h2, ch4, c2h6):
+    """Clasificación según Tabla D.3 (Triángulo 4: fallas de baja temperatura) - IEEE C57.104-2019.
+    Usa el mismo método de polígonos que la graficación."""
+    from matplotlib.path import Path
+    
+    if abs(h2 + ch4 + c2h6 - 100) > 0.01:
+        return "Fuera (suma ≠ 100%)"
+    
+    # Definición de polígonos (mismos que en plot_duval_triangle4)
+    polygons_t4 = {
+        "PD": np.array([
+            [98, 2, 0],
+            [85, 15, 0],
+            [84, 15, 1],
+            [97, 2, 1]
+        ]),
+        "O": np.array([
+            [9, 61, 30],
+            [0, 70, 30],
+            [0, 0, 100],
+            [9, 0, 91]
+        ]),
+        "ND": np.array([
+            [9, 45, 46],
+            [54, 0, 46],
+            [9, 0, 91]
+        ]),
+        "C": np.array([
+            [40, 36, 24],
+            [15, 61, 24],
+            [15, 55, 30],
+            [0, 70, 30],
+            [0, 100, 0],
+            [64, 36, 0],
+            [52, 36, 12]
+        ]),
+        "S": np.array([
+            [97, 2, 1],
+            [84, 15, 1],
+            [63, 36, 1],
+            [52, 36, 12],
+            [40, 36, 24],
+            [15, 61, 24],
+            [9, 67, 24],
+            [9, 61, 30],
+            [9, 45, 46],
+            [54, 0, 46],
+            [76, 0, 24],
+            [99, 0, 1]
+        ])
+    }
+    
+    # Punto a clasificar (en coordenadas ternarias)
+    point = np.array([h2, ch4, c2h6])
+    
+    # Verificar en qué polígono está el punto (orden de prioridad)
+    for zona_nombre in ["PD", "ND", "O", "C", "S"]:
+        poly_coords = polygons_t4[zona_nombre]
+        # Convertir a coordenadas cartesianas para la comparación
+        poly_xy = np.array([tern2cart_t4(p[0], p[1], p[2]) for p in poly_coords])
+        point_xy = tern2cart_t4(h2, ch4, c2h6)
+        
+        # Crear path y verificar si el punto está dentro
+        path = Path(poly_xy)
+        if path.contains_point(point_xy):
+            return zona_nombre
+    
+    return "ND"  # Por defecto si no está en ninguno
+
+
+# --- TRIÁNGULO 5 (CH4, C2H4, C2H6) — IEEE Fig. D.4, Tabla D.4 ---
+def tern2cart_t5(ch4, c2h4, c2h6):
+    """Convierte % (CH4, C2H4, C2H6) a (x,y). 
+    CH4=arriba (0.5,1), C2H4=abajo derecha (1,0), C2H6=abajo izquierda (0,0)."""
+    ch4, c2h4, c2h6 = np.atleast_1d(ch4), np.atleast_1d(c2h4), np.atleast_1d(c2h6)
+    x = c2h4 / 100 + ch4 / 200
+    y = ch4 / 100
+    return np.squeeze(x), np.squeeze(y)
+
+
+def clasificar_duval_triangulo5(ch4, c2h4, c2h6):
+    """Clasificación según Tabla D.4 (Triángulo 5: fallas de alta temperatura) - IEEE C57.104-2019.
+    Usa el mismo método de polígonos que la graficación."""
+    from matplotlib.path import Path
+    
+    if abs(ch4 + c2h4 + c2h6 - 100) > 0.01:
+        return "Fuera (suma ≠ 100%)"
+    
+    # Definición de polígonos (mismos que en plot_duval_triangle5)
+    polygons_t5 = {
+        "PD": np.array([
+            [98, 0, 2],
+            [97, 1, 2],
+            [85, 1, 14],
+            [86, 0, 14]
+        ]),
+        "S": np.array([
+            [86, 0, 14],
+            [76, 10, 14],
+            [36, 10, 54],
+            [46, 0, 54]
+        ]),
+        "ND": np.array([
+            [60, 10, 30],
+            [35, 35, 30],
+            [0, 35, 65],
+            [0, 10, 90]
+        ]),
+        "T2": np.array([
+            [90, 10, 0],
+            [65, 35, 0],
+            [53, 35, 12],
+            [78, 10, 12]
+        ]),
+        "C": np.array([
+            [78, 10, 12],
+            [76, 10, 14],
+            [60, 10, 30],
+            [35, 35, 30],
+            [0, 70, 30],
+            [16, 70, 14],
+            [36, 50, 14],
+            [38, 50, 12]
+        ]),
+        "T3": np.array([
+            [65, 35, 0],
+            [0, 100, 0],
+            [0, 70, 30],
+            [35, 35, 30],
+            [53, 35, 12]
+        ]),
+        "O": np.array([
+            [97, 1, 2],
+            [85, 1, 14],
+            [76, 10, 14],
+            [78, 10, 12],
+            [90, 10, 0],
+            [100, 0, 0],
+            [46, 0, 54],
+            [36, 10, 54],
+            [0, 10, 90],
+            [0, 0, 100],
+            [98, 0, 2]
+        ])
+    }
+    
+    # Punto a clasificar (en coordenadas ternarias)
+    point = np.array([ch4, c2h4, c2h6])
+    
+    # Verificar en qué polígono está el punto (orden de prioridad)
+    for zona_nombre in ["PD", "T2", "T3", "C", "S", "ND", "O"]:
+        poly_coords = polygons_t5[zona_nombre]
+        # Convertir a coordenadas cartesianas para la comparación
+        poly_xy = np.array([tern2cart_t5(p[0], p[1], p[2]) for p in poly_coords])
+        point_xy = tern2cart_t5(ch4, c2h4, c2h6)
+        
+        # Crear path y verificar si el punto está dentro
+        path = Path(poly_xy)
+        if path.contains_point(point_xy):
+            return zona_nombre
+    
+    return "ND"  # Por defecto si no está en ninguno
+
+
+# --- PENTÁGONO DUVAL 1 y 2 — IEEE Fig. D.1 / D.5, coordenadas (x,y) ---
+# Vértices en orden H2, C2H6, CH4, C2H4, C2H2 (dot en (0,0), H2 en (0,40)).
+PENTAGON_VERTICES = np.array([[0, 40], [38, 12], [32, -6.1], [4, 16], [0, 1.5]])
+
+
+def pentagon_percent_to_xy(h2, c2h6, ch4, c2h4, c2h2):
+    """Convierte % de los 5 gases (suma=100) a coordenadas (x,y) del Pentágono Duval.
+    
+    Calibración según IEEE C57.104-2019:
+    - Vértice H2 en (0, 40)
+    - Factor de escala = 0.4 (para entradas en %)
+    - Orden anti-horario: H2 -> C2H6 -> CH4 -> C2H4 -> C2H2
+    """
+    # 1. Vector de gases
+    gases = np.array([h2, c2h6, ch4, c2h4, c2h2], dtype=float)
+    total = np.sum(gases)
+    
+    if total == 0:
+        return 0.0, 0.0
+    
+    # 2. Normalización a Porcentaje (0-100)
+    gases_pct = (gases / total) * 100
+    
+    # 3. Definición de Ángulos (Standard Order: H2 -> C2H6 -> CH4 -> C2H4 -> C2H2)
+    # H2 está a 90 grados. Los vértices rotan 72 grados (360/5) en sentido anti-horario.
+    angulos_deg = np.array([90, 162, 234, 306, 18])
+    angulos_rad = np.deg2rad(angulos_deg)
+    
+    # 4. Cálculo Vectorial con Factor de Escala IEEE (k=0.4)
+    # El radio del pentágono en la norma es 40, no 100.
+    factor_escala = 0.4
+    
+    x = factor_escala * np.sum(gases_pct * np.cos(angulos_rad))
+    y = factor_escala * np.sum(gases_pct * np.sin(angulos_rad))
+    
+    return float(x), float(y)
+
+
+
+# Polígonos Pentágono 1 (IEEE D.3): PD, D1, D2, T3, T2, T1, S
+PENTAGON1_ZONES = {
+    "PD": np.array([[0, 33], [-1, 33], [-1, 24.5], [0, 24.5]]),
+    "D1": np.array([[0, 40], [38, 12], [32, -6.1], [4, 16], [0, 1.5]]),
+    "D2": np.array([[4, 16], [32, -6.1], [24.3, -30], [0, -3], [0, 1.5]]),
+    "T3": np.array([[0, -3], [24.3, -30], [23.5, -32.4], [1, -32], [-6, -4]]),
+    "T2": np.array([[-6, -4], [1, -32.4], [-22.5, -32.4]]),
+    "T1": np.array([[-6, -4], [-22.5, -32.4], [-23.5, -32.4], [-35, 3], [0, 1.5], [0, -3]]),
+    "S": np.array([[0, 1.5], [-35, 3.1], [-38, 12.4], [0, 40], [0, 33], [-1, 33], [-1, 24.5], [0, 24.5]]),
+}
+
+# Polígonos Pentágono 2 (IEEE D.5): PD, D1, D2, S, T3-H, C, O
+PENTAGON2_ZONES = {
+    "PD": np.array([[0, 33], [-1, 33], [-1, 24.5], [0, 24.5]]),
+    "D1": np.array([[0, 40], [38, 12], [32, -6.1], [4, 16], [0, 1.5]]),
+    "D2": np.array([[4, 16], [32, -6.1], [24.3, -30], [0, -3], [0, 1.5]]),
+    "S": np.array([[0, 1.5], [-35, 3.1], [-38, 12.4], [0, 40], [0, 33], [-1, 33], [-1, 24.5], [0, 24.5]]),
+    "T3-H": np.array([[0, -3], [24.3, -30], [23.5, -32.4], [2.5, -32.4], [-3.5, -3]]),
+    "C": np.array([[-3.5, -3], [2.5, -32.4], [-21.5, -32.4], [-11, -8]]),
+    "O": np.array([[-3.5, -3], [-11, -8], [-21.5, -32.4], [-23.5, -32.4], [-35, 3.1], [0, 1.5], [0, -3]]),
+}
+
+
+def clasificar_pentagon(x, y, zones_dict):
+    """Devuelve el código de zona si (x,y) está dentro de algún polígono (orden fijo para prioridad)."""
+    from matplotlib.path import Path
+    order = list(zones_dict.keys())
+    for name in order:
+        p = zones_dict[name]
+        if len(p) < 3:
+            continue
+        path = Path(p)
+        if path.contains_point((x, y)):
+            return name
+    return "ND"
 
 # --- GENERADOR DE GRÁFICOS ---
 def plot_duval_triangle(ch4_p, c2h4_p, c2h2_p, fault_code):
@@ -302,66 +589,443 @@ def plot_duval_triangle(ch4_p, c2h4_p, c2h2_p, fault_code):
     plt.tight_layout()
     return fig
 
+
+def plot_duval_triangle4(h2_p, ch4_p, c2h6_p, fault_code):
+    """Triángulo de Duval 4 (H2, CH4, C2H6) — fallas de baja temperatura, Fig. D.3.
+    Usa polígonos exactos según las coordenadas del estándar IEEE."""
+    fig, ax = plt.subplots(figsize=(9, 7))
+    
+    # Vértices del triángulo base
+    verts = np.array([[0, 0], [1, 0], [0.5, 1], [0, 0]])
+    ax.plot(verts[:, 0], verts[:, 1], "k-", lw=2)
+    
+    # Colores de las zonas
+    colores_t4 = {"PD": "#FFE4B5", "S": "#E6E6FA", "O": "#98FB98", "C": "#FFB6C1", "ND": "#D3D3D3"}
+    
+    # Definición de polígonos con coordenadas exactas (H2%, CH4%, C2H6%)
+    polygons_t4 = {
+        "PD": np.array([
+            [98, 2, 0],
+            [85, 15, 0],
+            [84, 15, 1],
+            [97, 2, 1]
+        ]),
+        "O": np.array([
+            [9, 61, 30],
+            [0, 70, 30],
+            [0, 0, 100],
+            [9, 0, 91]
+        ]),
+        "ND": np.array([
+            [9, 45, 46],
+            [54, 0, 46],
+            [9, 0, 91]
+        ]),
+        "C": np.array([
+            [40, 36, 24],
+            [15, 61, 24],
+            [15, 55, 30],
+            [0, 70, 30],
+            [0, 100, 0],
+            [64, 36, 0],
+            [52, 36, 12]
+        ]),
+        "S": np.array([
+            [97, 2, 1],
+            [84, 15, 1],
+            [63, 36, 1],
+            [52, 36, 12],
+            [40, 36, 24],
+            [15, 61, 24],
+            [9, 67, 24],
+            [9, 61, 30],
+            [9, 45, 46],
+            [54, 0, 46],
+            [76, 0, 24],
+            [99, 0, 1]
+        ])
+    }
+    
+    # Dibujar cada polígono
+    for zona_nombre in ["S", "ND", "O", "C", "PD"]:  # Orden de dibujado (más grande primero)
+        poly_coords = polygons_t4[zona_nombre]
+        # Convertir coordenadas ternarias a cartesianas
+        xy_coords = np.array([tern2cart_t4(h2, ch4, c2h6) for h2, ch4, c2h6 in poly_coords])
+        
+        # Dibujar polígono relleno
+        polygon = mpatches.Polygon(xy_coords, facecolor=colores_t4[zona_nombre], 
+                                   alpha=0.6, edgecolor="gray", linewidth=1)
+        ax.add_patch(polygon)
+    
+    # Líneas de referencia opcionales
+    limites_h2 = [9, 15]
+    limites_ch4 = [2, 15, 36, 61]
+    limites_c2h6 = [1, 24, 30, 46]
+    
+    for v in limites_h2:
+        h2, ch4, c2h6 = segmento_ternario_t4("H2", v)
+        if len(h2):
+            x, y = tern2cart_t4(h2, ch4, c2h6)
+            ax.plot(x, y, "k-", lw=0.5, alpha=0.3)
+    for v in limites_ch4:
+        h2, ch4, c2h6 = segmento_ternario_t4("CH4", v)
+        if len(h2):
+            x, y = tern2cart_t4(h2, ch4, c2h6)
+            ax.plot(x, y, "k-", lw=0.5, alpha=0.3)
+    for v in limites_c2h6:
+        h2, ch4, c2h6 = segmento_ternario_t4("C2H6", v)
+        if len(h2):
+            x, y = tern2cart_t4(h2, ch4, c2h6)
+            ax.plot(x, y, "k-", lw=0.5, alpha=0.3)
+    
+    # Leyenda
+    zonas_t4 = ["PD", "S", "O", "C", "ND"]
+    legend_el = [mpatches.Patch(facecolor=colores_t4[z], alpha=0.6, edgecolor="gray", label=z) 
+                 for z in zonas_t4]
+    legend_el.append(mlines.Line2D([0], [0], marker="*", color="w", markeredgecolor="black", 
+                                   markerfacecolor="red", markersize=14, linestyle="None", 
+                                   label="Punto actual"))
+    ax.legend(handles=legend_el, loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
+    
+    # Punto del usuario
+    user_x, user_y = tern2cart_t4(h2_p, ch4_p, c2h6_p)
+    ax.plot(user_x, user_y, marker="*", markersize=18, color="red", markeredgecolor="black", zorder=5)
+    
+    # Etiquetas de ejes
+    ax.text(0.5, 1.05, "% H₂", fontsize=10, ha="center")
+    ax.text(-0.06, -0.04, "% C₂H₆", fontsize=10, ha="center")
+    ax.text(1.06, -0.04, "% CH₄", fontsize=10, ha="center")
+    
+    ax.set_xlim(-0.08, 1.08)
+    ax.set_ylim(-0.08, 1.08)
+    ax.set_aspect("equal")
+    ax.axis("off")
+    plt.tight_layout()
+    return fig
+
+
+
+def plot_duval_triangle5(ch4_p, c2h4_p, c2h6_p, fault_code):
+    """Triángulo de Duval 5 (CH4, C2H4, C2H6) — fallas de alta temperatura, Fig. D.4.
+    Usa polígonos exactos según las coordenadas del estándar IEEE."""
+    fig, ax = plt.subplots(figsize=(9, 7))
+    
+    # Vértices del triángulo base
+    verts = np.array([[0, 0], [1, 0], [0.5, 1], [0, 0]])
+    ax.plot(verts[:, 0], verts[:, 1], "k-", lw=2)
+    
+    # Colores de las zonas
+    colores_t5 = {"PD": "#FFE4B5", "O": "#98FB98", "S": "#E6E6FA", "T2": "#90EE90", 
+                  "T3": "#00FA9A", "C": "#FFB6C1", "ND": "#D3D3D3"}
+    
+    # Definición de polígonos con coordenadas exactas (CH4%, C2H4%, C2H6%)
+    polygons_t5 = {
+        "PD": np.array([
+            [98, 0, 2],
+            [97, 1, 2],
+            [85, 1, 14],
+            [86, 0, 14]
+        ]),
+        "S": np.array([
+            [86, 0, 14],
+            [76, 10, 14],
+            [36, 10, 54],
+            [46, 0, 54]
+        ]),
+        "ND": np.array([
+            [60, 10, 30],
+            [35, 35, 30],
+            [0, 35, 65],
+            [0, 10, 90]
+        ]),
+        "T2": np.array([
+            [90, 10, 0],
+            [65, 35, 0],
+            [53, 35, 12],
+            [78, 10, 12]
+        ]),
+        "C": np.array([
+            [78, 10, 12],
+            [76, 10, 14],
+            [60, 10, 30],
+            [35, 35, 30],
+            [0, 70, 30],
+            [16, 70, 14],
+            [36, 50, 14],
+            [38, 50, 12]
+        ]),
+        "T3": np.array([
+            [65, 35, 0],
+            [0, 100, 0],
+            [0, 70, 30],
+            [35, 35, 30],
+            [53, 35, 12]
+        ]),
+        "O": np.array([
+            [97, 1, 2],
+            [85, 1, 14],
+            [76, 10, 14],
+            [78, 10, 12],
+            [90, 10, 0],
+            [100, 0, 0],
+            [46, 0, 54],
+            [36, 10, 54],
+            [0, 10, 90],
+            [0, 0, 100],
+            [98, 0, 2]
+        ])
+    }
+    
+    # Dibujar cada polígono (orden de dibujado)
+    for zona_nombre in ["O", "T3", "ND", "C", "T2", "S", "PD"]:
+        poly_coords = polygons_t5[zona_nombre]
+        # Convertir coordenadas ternarias a cartesianas
+        xy_coords = np.array([tern2cart_t5(ch4, c2h4, c2h6) for ch4, c2h4, c2h6 in poly_coords])
+        
+        # Dibujar polígono relleno
+        polygon = mpatches.Polygon(xy_coords, facecolor=colores_t5[zona_nombre], 
+                                   alpha=0.6, edgecolor="gray", linewidth=1)
+        ax.add_patch(polygon)
+    
+    # Líneas de referencia opcionales
+    limites_ch4 = [10, 35, 50, 70]
+    limites_c2h4 = [1, 10, 35]
+    limites_c2h6 = [2, 12, 14, 30, 54]
+    
+    for v in limites_ch4:
+        ch4, c2h4, c2h6 = segmento_ternario_t5("CH4", v)
+        if len(ch4):
+            x, y = tern2cart_t5(ch4, c2h4, c2h6)
+            ax.plot(x, y, "k-", lw=0.5, alpha=0.3)
+    for v in limites_c2h4:
+        ch4, c2h4, c2h6 = segmento_ternario_t5("C2H4", v)
+        if len(ch4):
+            x, y = tern2cart_t5(ch4, c2h4, c2h6)
+            ax.plot(x, y, "k-", lw=0.5, alpha=0.3)
+    for v in limites_c2h6:
+        ch4, c2h4, c2h6 = segmento_ternario_t5("C2H6", v)
+        if len(ch4):
+            x, y = tern2cart_t5(ch4, c2h4, c2h6)
+            ax.plot(x, y, "k-", lw=0.5, alpha=0.3)
+    
+    # Leyenda
+    zonas_t5 = ["PD", "O", "S", "T2", "T3", "C", "ND"]
+    legend_el = [mpatches.Patch(facecolor=colores_t5[z], alpha=0.6, edgecolor="gray", label=z) 
+                 for z in zonas_t5]
+    legend_el.append(mlines.Line2D([0], [0], marker="*", color="w", markeredgecolor="black", 
+                                   markerfacecolor="red", markersize=14, linestyle="None", 
+                                   label="Punto actual"))
+    ax.legend(handles=legend_el, loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=9)
+    
+    # Punto del usuario
+    user_x, user_y = tern2cart_t5(ch4_p, c2h4_p, c2h6_p)
+    ax.plot(user_x, user_y, marker="*", markersize=18, color="red", markeredgecolor="black", zorder=5)
+    
+    # Etiquetas de ejes
+    ax.text(0.5, 1.05, "% CH₄", fontsize=10, ha="center")
+    ax.text(-0.06, -0.04, "% C₂H₆", fontsize=10, ha="center")
+    ax.text(1.06, -0.04, "% C₂H₄", fontsize=10, ha="center")
+    
+    ax.set_xlim(-0.08, 1.08)
+    ax.set_ylim(-0.08, 1.08)
+    ax.set_aspect("equal")
+    ax.axis("off")
+    plt.tight_layout()
+    return fig
+
+
+def plot_duval_pentagon(x_pt, y_pt, zones_dict, title_suffix=""):
+    """Dibuja Pentágono Duval (1 o 2) con zonas en polígonos y punto (x_pt, y_pt)."""
+    fig, ax = plt.subplots(figsize=(9, 8))
+    colores_pent = {
+        "PD": "#FFE4B5", "D1": "#FFB6C1", "D2": "#FF69B4", "T1": "#98FB98", "T2": "#90EE90", "T3": "#00FA9A",
+        "S": "#E6E6FA", "T3-H": "#87CEEB", "C": "#DDA0DD", "O": "#F0E68C", "ND": "#D3D3D3",
+    }
+    for name, poly in zones_dict.items():
+        if len(poly) < 3:
+            continue
+        p = mpatches.Polygon(poly, facecolor=colores_pent.get(name, "#E0E0E0"), alpha=0.6, edgecolor="gray", linewidth=1)
+        ax.add_patch(p)
+        ax.plot(np.append(poly[:, 0], poly[0, 0]), np.append(poly[:, 1], poly[0, 1]), "k-", lw=1)
+    ax.plot(x_pt, y_pt, marker="*", markersize=18, color="red", markeredgecolor="black", zorder=5)
+    legend_el = [mpatches.Patch(facecolor=colores_pent.get(z, "#ccc"), alpha=0.6, edgecolor="gray", label=z) for z in zones_dict.keys()]
+    legend_el.append(mlines.Line2D([0], [0], marker="*", color="w", markeredgecolor="black", markerfacecolor="red", markersize=14, linestyle="None", label="Punto actual"))
+    ax.legend(handles=legend_el, loc="center left", bbox_to_anchor=(1.02, 0.5), fontsize=8)
+    ax.set_xlim(-42, 42)
+    ax.set_ylim(-36, 44)
+    ax.set_aspect("equal")
+    ax.axhline(0, color="gray", ls=":", alpha=0.5)
+    ax.axvline(0, color="gray", ls=":", alpha=0.5)
+    ax.set_title(f"Pentágono de Duval {title_suffix}".strip(), fontsize=11)
+    ax.axis("on")
+    ax.set_xlabel("x (coords. IEEE)")
+    ax.set_ylabel("y (coords. IEEE)")
+    plt.tight_layout()
+    return fig
+
+
 # --- INTERFAZ DE USUARIO ---
 
 # Sidebar
 st.sidebar.header("🎛️ Datos del Transformador")
-st.sidebar.caption("_Aplica al Triángulo de Duval._")
+
+# Selector de diagrama (IEEE C57.104-2019 Annex D)
+diagrama = st.sidebar.selectbox(
+    "Diagrama de Duval",
+    [
+        "Triángulo 1 (CH₄, C₂H₄, C₂H₂)",
+        "Triángulo 4 (H₂, CH₄, C₂H₆) — fallas baja T",
+        "Triángulo 5 (CH₄, C₂H₄, C₂H₆) — fallas alta T",
+        "Pentágono 1 (H₂, C₂H₆, CH₄, C₂H₄, C₂H₂)",
+        "Pentágono 2 (H₂, C₂H₆, CH₄, C₂H₄, C₂H₂) — sub-tipos",
+    ],
+    help="Triángulo 1: seis fallas básicas. Triángulo 4/5: sub-tipos térmicos. Pentágono 1/2: cinco gases.",
+)
 
 # Opción de entrada
 input_mode = st.sidebar.radio("Unidades de entrada:", ["PPM (Partes por millón)", "% Porcentaje Relativo"])
 
+needs_h2 = "Triángulo 4" in diagrama or "Pentágono" in diagrama
+needs_c2h6 = "Triángulo 4" in diagrama or "Triángulo 5" in diagrama or "Pentágono" in diagrama
+
 if input_mode == "PPM (Partes por millón)":
-    st.sidebar.caption("Ingresa los valores del reporte DGA:")
+    st.sidebar.caption("Ingresa los valores del reporte DGA (µL/L o ppm):")
+    if needs_h2:
+        val_h2 = st.sidebar.number_input("Hidrógeno (H2)", min_value=0.0, value=0.0)
+    else:
+        val_h2 = 0.0
     val_ch4 = st.sidebar.number_input("Metano (CH4)", min_value=0.0, value=10.0)
+    if needs_c2h6:
+        val_c2h6 = st.sidebar.number_input("Etano (C2H6)", min_value=0.0, value=5.0)
+    else:
+        val_c2h6 = 0.0
     val_c2h4 = st.sidebar.number_input("Etileno (C2H4)", min_value=0.0, value=10.0)
     val_c2h2 = st.sidebar.number_input("Acetileno (C2H2)", min_value=0.0, value=10.0)
-    
-    total = val_ch4 + val_c2h4 + val_c2h2
-    if total > 0:
-        pct_ch4 = (val_ch4 / total) * 100
-        pct_c2h4 = (val_c2h4 / total) * 100
-        pct_c2h2 = (val_c2h2 / total) * 100
+
+    if "Triángulo 1" in diagrama:
+        total = val_ch4 + val_c2h4 + val_c2h2
+        if total > 0:
+            pct_ch4 = (val_ch4 / total) * 100
+            pct_c2h4 = (val_c2h4 / total) * 100
+            pct_c2h2 = (val_c2h2 / total) * 100
+        else:
+            pct_ch4, pct_c2h4, pct_c2h2 = 0, 0, 0
+        pct_h2 = pct_c2h6 = 0.0
+    elif "Triángulo 4" in diagrama:
+        total = val_h2 + val_ch4 + val_c2h6
+        if total > 0:
+            pct_h2 = (val_h2 / total) * 100
+            pct_ch4 = (val_ch4 / total) * 100
+            pct_c2h6 = (val_c2h6 / total) * 100
+        else:
+            pct_h2, pct_ch4, pct_c2h6 = 0, 0, 0
+        pct_c2h4 = pct_c2h2 = 0.0
+    elif "Triángulo 5" in diagrama:
+        total = val_ch4 + val_c2h4 + val_c2h6
+        if total > 0:
+            pct_ch4 = (val_ch4 / total) * 100
+            pct_c2h4 = (val_c2h4 / total) * 100
+            pct_c2h6 = (val_c2h6 / total) * 100
+        else:
+            pct_ch4, pct_c2h4, pct_c2h6 = 0, 0, 0
+        pct_h2 = pct_c2h2 = 0.0
     else:
-        pct_ch4, pct_c2h4, pct_c2h2 = 0, 0, 0
+        total = val_h2 + val_c2h6 + val_ch4 + val_c2h4 + val_c2h2
+        if total > 0:
+            pct_h2 = (val_h2 / total) * 100
+            pct_c2h6 = (val_c2h6 / total) * 100
+            pct_ch4 = (val_ch4 / total) * 100
+            pct_c2h4 = (val_c2h4 / total) * 100
+            pct_c2h2 = (val_c2h2 / total) * 100
+        else:
+            pct_h2 = pct_c2h6 = pct_ch4 = pct_c2h4 = pct_c2h2 = 0.0
 else:
     st.sidebar.caption("Ingresa los porcentajes relativos (suma 100%):")
-    pct_ch4 = st.sidebar.slider("% Metano (CH4)", 0.0, 100.0, 33.3)
-    pct_c2h4 = st.sidebar.slider("% Etileno (C2H4)", 0.0, 100.0, 33.3)
-    # Ajuste automático del tercero para guiar al usuario
-    resto = 100.0 - pct_ch4 - pct_c2h4
-    if resto < 0: resto = 0
-    st.sidebar.info(f"El % Acetileno (C2H2) calculado es: {resto:.1f}%")
-    pct_c2h2 = resto
-    
-    # Normalizar si el usuario mueve sliders locamente
-    total_slider = pct_ch4 + pct_c2h4 + pct_c2h2
+    if "Triángulo 1" in diagrama:
+        pct_ch4 = st.sidebar.slider("% Metano (CH4)", 0.0, 100.0, 33.3)
+        pct_c2h4 = st.sidebar.slider("% Etileno (C2H4)", 0.0, 100.0, 33.3)
+        resto = max(0, 100.0 - pct_ch4 - pct_c2h4)
+        st.sidebar.info(f"El % Acetileno (C2H2) calculado es: {resto:.1f}%")
+        pct_c2h2 = resto
+        pct_h2 = pct_c2h6 = 0.0
+    elif "Triángulo 4" in diagrama:
+        pct_h2 = st.sidebar.slider("% H₂", 0.0, 100.0, 20.0)
+        pct_ch4 = st.sidebar.slider("% CH₄", 0.0, 100.0, 40.0)
+        resto = max(0, 100.0 - pct_h2 - pct_ch4)
+        st.sidebar.info(f"El % C₂H₆ calculado es: {resto:.1f}%")
+        pct_c2h6 = resto
+        pct_c2h4 = pct_c2h2 = 0.0
+    elif "Triángulo 5" in diagrama:
+        pct_ch4 = st.sidebar.slider("% CH₄", 0.0, 100.0, 33.0)
+        pct_c2h4 = st.sidebar.slider("% C₂H₄", 0.0, 100.0, 33.0)
+        resto = max(0, 100.0 - pct_ch4 - pct_c2h4)
+        st.sidebar.info(f"El % C₂H₆ calculado es: {resto:.1f}%")
+        pct_c2h6 = resto
+        pct_h2 = pct_c2h2 = 0.0
+    else:
+        pct_h2 = st.sidebar.slider("% H₂", 0.0, 100.0, 10.0)
+        pct_c2h6 = st.sidebar.slider("% C₂H₆", 0.0, 100.0, 10.0)
+        pct_ch4 = st.sidebar.slider("% CH₄", 0.0, 100.0, 30.0)
+        pct_c2h4 = st.sidebar.slider("% C₂H₄", 0.0, 100.0, 30.0)
+        resto = max(0, 100.0 - pct_h2 - pct_c2h6 - pct_ch4 - pct_c2h4)
+        st.sidebar.info(f"El % C₂H₂ calculado es: {resto:.1f}%")
+        pct_c2h2 = resto
+    total_slider = pct_h2 + pct_c2h6 + pct_ch4 + pct_c2h4 + pct_c2h2
     if total_slider > 0 and abs(total_slider - 100) > 1:
-        pct_ch4 = (pct_ch4 / total_slider) * 100
-        pct_c2h4 = (pct_c2h4 / total_slider) * 100
-        pct_c2h2 = (pct_c2h2 / total_slider) * 100
+        f = 100.0 / total_slider
+        pct_h2, pct_c2h6, pct_ch4, pct_c2h4, pct_c2h2 = pct_h2*f, pct_c2h6*f, pct_ch4*f, pct_c2h4*f, pct_c2h2*f
 
-# Cálculo
-diagnostico = clasificar_duval(pct_ch4, pct_c2h4, pct_c2h2)
+# Clasificación según diagrama seleccionado
+if "Triángulo 1" in diagrama:
+    diagnostico = clasificar_duval(pct_ch4, pct_c2h4, pct_c2h2)
+elif "Triángulo 4" in diagrama:
+    diagnostico = clasificar_duval_triangulo4(pct_h2, pct_ch4, pct_c2h6)
+elif "Triángulo 5" in diagrama:
+    diagnostico = clasificar_duval_triangulo5(pct_ch4, pct_c2h4, pct_c2h6)
+elif "Pentágono 1" in diagrama:
+    px, py = pentagon_percent_to_xy(pct_h2, pct_c2h6, pct_ch4, pct_c2h4, pct_c2h2)
+    diagnostico = clasificar_pentagon(px, py, PENTAGON1_ZONES)
+else:
+    px, py = pentagon_percent_to_xy(pct_h2, pct_c2h6, pct_ch4, pct_c2h4, pct_c2h2)
+    diagnostico = clasificar_pentagon(px, py, PENTAGON2_ZONES)
+
 nombre_falla, descripcion_falla, recomendacion = get_fault_details(diagnostico)
 
 # --- PESTAÑAS PRINCIPALES ---
-tab_duval, tab_ieee = st.tabs(["📐 Triángulo de Duval", "📋 Límites IEEE (P90/P95)"])
+tab_duval, tab_ieee = st.tabs(["📐 Duval (Triángulos / Pentágonos)", "📋 Límites IEEE (P90/P95)"])
 
 with tab_duval:
-    # --- COLUMNAS PRINCIPALES (DUVAL) ---
     col1, col2 = st.columns([1, 1.2])
 
     with col1:
         st.subheader("🔍 Resultados del Análisis")
-        m1, m2, m3 = st.columns(3)
-        m1.metric("CH4 (Metano)", f"{pct_ch4:.1f}%")
-        m2.metric("C2H4 (Etileno)", f"{pct_c2h4:.1f}%")
-        m3.metric("C2H2 (Acetileno)", f"{pct_c2h2:.1f}%")
+        if "Triángulo 1" in diagrama:
+            m1, m2, m3 = st.columns(3)
+            m1.metric("CH₄ (Metano)", f"{pct_ch4:.1f}%")
+            m2.metric("C₂H₄ (Etileno)", f"{pct_c2h4:.1f}%")
+            m3.metric("C₂H₂ (Acetileno)", f"{pct_c2h2:.1f}%")
+        elif "Triángulo 4" in diagrama:
+            m1, m2, m3 = st.columns(3)
+            m1.metric("H₂", f"{pct_h2:.1f}%")
+            m2.metric("CH₄", f"{pct_ch4:.1f}%")
+            m3.metric("C₂H₆", f"{pct_c2h6:.1f}%")
+        elif "Triángulo 5" in diagrama:
+            m1, m2, m3 = st.columns(3)
+            m1.metric("CH₄", f"{pct_ch4:.1f}%")
+            m2.metric("C₂H₄", f"{pct_c2h4:.1f}%")
+            m3.metric("C₂H₆", f"{pct_c2h6:.1f}%")
+        else:
+            m1, m2, m3, m4, m5 = st.columns(5)
+            m1.metric("H₂", f"{pct_h2:.1f}%")
+            m2.metric("C₂H₆", f"{pct_c2h6:.1f}%")
+            m3.metric("CH₄", f"{pct_ch4:.1f}%")
+            m4.metric("C₂H₄", f"{pct_c2h4:.1f}%")
+            m5.metric("C₂H₂", f"{pct_c2h2:.1f}%")
         st.divider()
         if diagnostico == "PD": color_res = "orange"
         elif diagnostico in ["T1", "T2", "T3"]: color_res = "#FF4B4B"
         elif diagnostico in ["D1", "D2", "DT"]: color_res = "#800080"
+        elif diagnostico in ["S", "O", "C", "T3-H"]: color_res = "#4169E1"
         else: color_res = "gray"
         st.markdown(f"""
         <div style="padding:20px; border-radius:10px; border:2px solid {color_res}; background-color: rgba(0,0,0,0.05);">
@@ -375,21 +1039,44 @@ with tab_duval:
             st.session_state["dga_history"] = []
         id_trafo = st.text_input("Identificador del Transformador (Opcional)", "Trafo-01")
         if st.button("💾 Guardar en Historial de Sesión"):
-            registro = {
-                "ID": id_trafo,
-                "CH4_pct": round(pct_ch4, 1),
-                "C2H4_pct": round(pct_c2h4, 1),
-                "C2H2_pct": round(pct_c2h2, 1),
-                "Código": diagnostico,
-                "Diagnóstico": nombre_falla
-            }
+            registro = {"ID": id_trafo, "Diagrama": diagrama, "Código": diagnostico, "Diagnóstico": nombre_falla}
+            if "Triángulo 1" in diagrama:
+                registro.update({"CH4_pct": round(pct_ch4, 1), "C2H4_pct": round(pct_c2h4, 1), "C2H2_pct": round(pct_c2h2, 1)})
+            elif "Triángulo 4" in diagrama:
+                registro.update({"H2_pct": round(pct_h2, 1), "CH4_pct": round(pct_ch4, 1), "C2H6_pct": round(pct_c2h6, 1)})
+            elif "Triángulo 5" in diagrama:
+                registro.update({"CH4_pct": round(pct_ch4, 1), "C2H4_pct": round(pct_c2h4, 1), "C2H6_pct": round(pct_c2h6, 1)})
+            else:
+                registro.update({"H2_pct": round(pct_h2, 1), "C2H6_pct": round(pct_c2h6, 1), "CH4_pct": round(pct_ch4, 1), "C2H4_pct": round(pct_c2h4, 1), "C2H2_pct": round(pct_c2h2, 1)})
             st.session_state["dga_history"].append(registro)
             st.success("Registro añadido.")
 
     with col2:
-        st.subheader("📐 Gráfico de Duval")
-        if pct_ch4 + pct_c2h4 + pct_c2h2 > 0:
-            fig = plot_duval_triangle(pct_ch4, pct_c2h4, pct_c2h2, diagnostico)
+        st.subheader(f"📐 {diagrama}")
+        can_plot = False
+        if "Triángulo 1" in diagrama:
+            can_plot = (pct_ch4 + pct_c2h4 + pct_c2h2) > 0
+            if can_plot:
+                fig = plot_duval_triangle(pct_ch4, pct_c2h4, pct_c2h2, diagnostico)
+        elif "Triángulo 4" in diagrama:
+            can_plot = (pct_h2 + pct_ch4 + pct_c2h6) > 0
+            if can_plot:
+                fig = plot_duval_triangle4(pct_h2, pct_ch4, pct_c2h6, diagnostico)
+        elif "Triángulo 5" in diagrama:
+            can_plot = (pct_ch4 + pct_c2h4 + pct_c2h6) > 0
+            if can_plot:
+                fig = plot_duval_triangle5(pct_ch4, pct_c2h4, pct_c2h6, diagnostico)
+        elif "Pentágono 1" in diagrama:
+            can_plot = (pct_h2 + pct_c2h6 + pct_ch4 + pct_c2h4 + pct_c2h2) > 0
+            if can_plot:
+                px, py = pentagon_percent_to_xy(pct_h2, pct_c2h6, pct_ch4, pct_c2h4, pct_c2h2)
+                fig = plot_duval_pentagon(px, py, PENTAGON1_ZONES, "1")
+        else:
+            can_plot = (pct_h2 + pct_c2h6 + pct_ch4 + pct_c2h4 + pct_c2h2) > 0
+            if can_plot:
+                px, py = pentagon_percent_to_xy(pct_h2, pct_c2h6, pct_ch4, pct_c2h4, pct_c2h2)
+                fig = plot_duval_pentagon(px, py, PENTAGON2_ZONES, "2")
+        if can_plot:
             st.pyplot(fig)
         else:
             st.warning("Ingresa valores mayores a 0 para generar el gráfico.")
@@ -410,16 +1097,71 @@ with tab_duval:
     else:
         st.caption("Aún no hay registros guardados en esta sesión.")
 
-    with st.expander("📚 Teoría: Triángulo de Duval 1 (IEEE C57.104 / IEC 60599)"):
+    with st.expander("📚 Teoría: Diagramas de Duval (IEEE C57.104-2019 Annex D)"):
         st.markdown("""
-        El **Triángulo de Duval 1** se utiliza para gases generados por fallas en transformadores llenos de aceite mineral.
-        Utiliza tres gases clave que corresponden al aumento de energía de la falla:
-
-        * **CH4 (Metano):** Característico de puntos calientes de baja temperatura.
-        * **C2H4 (Etileno):** Característico de puntos calientes de alta temperatura (aceite quemado).
-        * **C2H2 (Acetileno):** Característico de arcos eléctricos (muy alta energía).
-
-        **Nota:** Este método se debe aplicar solo cuando existe una sospecha de falla (niveles de gas por encima de los límites normales o incremento súbito de la tasa de generación).
+        ### **Triángulo 1** (CH₄, C₂H₄, C₂H₂)
+        Detecta las seis fallas básicas: **PD** (descargas parciales), **D1** (descargas de baja energía), **D2** (descargas de alta energía / arco eléctrico), **T1** (falla térmica <300°C), **T2** (falla térmica 300-700°C), **T3** (falla térmica >700°C), y **DT** (falla mixta térmica y eléctrica).
+        
+        Este es el diagrama principal y debe usarse primero para el diagnóstico inicial.
+        
+        ---
+        
+        ### **Triángulo 4** (H₂, CH₄, C₂H₆) — Fallas de Baja Temperatura
+        
+        **Cuándo usar:**
+        - ✅ Solo después de identificar fallas **PD**, **T1** o **T2** en el Triángulo 1
+        - ✅ Transformadores sumergidos en aceite mineral
+        - ❌ **NUNCA** usar para fallas identificadas como **D1** o **D2** (descargas eléctricas)
+        
+        **Tipos de falla que identifica:**
+        - **PD**: Descargas parciales
+        - **S**: Stray gassing (gaseado del aceite a temperaturas <200°C, común en aceites nuevos o inestables)
+        - **O**: Sobrecalentamiento sin carbonización del papel (<250°C)
+        - **C**: Posible carbonización del papel (confirmar con análisis de furanos y CO/CO₂)
+        - **ND**: No determinado
+        
+        **Propósito:** Distinguir entre diferentes fenómenos térmicos de baja temperatura que pueden no involucrar carbonización de papel significativa, ayudando a determinar la severidad y urgencia de la condición.
+        
+        ---
+        
+        ### **Triángulo 5** (CH₄, C₂H₄, C₂H₆) — Fallas de Alta Temperatura
+        
+        **Cuándo usar:**
+        - ✅ Solo después de identificar fallas **T2** o **T3** en el Triángulo 1
+        - ✅ Transformadores sumergidos en aceite mineral
+        - ❌ **NUNCA** usar para fallas identificadas como **D1** o **D2** (descargas eléctricas)
+        
+        **Tipos de falla que identifica:**
+        - **PD**: Descargas parciales
+        - **O**: Sobrecalentamiento sin carbonización
+        - **S**: Stray gassing de menor preocupación
+        - **T2**: Falla térmica 300-700°C
+        - **T3**: Falla térmica >700°C en aceite y papel
+        - **C**: Carbonización de papel (requiere análisis complementario con furanos)
+        - **ND**: No determinado
+        
+        **Propósito:** Diferenciar entre fallas térmicas de alta temperatura que solo afectan al aceite versus aquellas que involucran carbonización del papel aislante. Esta distinción es crítica porque la carbonización del papel reduce significativamente la vida útil del transformador.
+        
+        ---
+        
+        ### **Pentágono 1** (H₂, C₂H₆, CH₄, C₂H₄, C₂H₂)
+        Usa los cinco hidrocarburos principales. Detecta las mismas seis fallas básicas del Triángulo 1 más el stray gassing (S). Proporciona mayor precisión al considerar todos los gases.
+        
+        ### **Pentágono 2** (H₂, C₂H₆, CH₄, C₂H₄, C₂H₂) — Sub-tipos
+        Distingue sub-tipos térmicos (**S**, **O**, **C**, **T3-H**) y eléctricos (**PD**, **D1**, **D2**). Útil para diagnósticos más refinados.
+        
+        ---
+        
+        ### ⚠️ **Reglas Importantes de Aplicación**
+        
+        1. **Siempre comience con el Triángulo 1** para diagnóstico inicial
+        2. Los **Triángulos 4 y 5 NUNCA deben usarse** para fallas eléctricas (**D1** o **D2**) identificadas en el Triángulo 1
+        3. Use **Triángulo 4** solo para refinar diagnósticos de **PD**, **T1** o **T2**
+        4. Use **Triángulo 5** solo para refinar diagnósticos de **T2** o **T3**
+        5. Complemente siempre con análisis de **furanos** (2-FAL) y **CO/CO₂** para confirmar carbonización de papel
+        6. Los pentágonos pueden usarse como método alternativo o complementario al Triángulo 1
+        
+        *Fuente: IEEE Std C57.104-2019, Annex D - "Guide for the Interpretation of Gases Generated in Mineral Oil-Immersed Transformers"*
         """)
 
 with tab_ieee:
