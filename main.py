@@ -14,10 +14,13 @@ st.set_page_config(page_title="Voltium | DGA Duval", layout="wide")
 # Título y Branding
 st.title("⚡ Simulador de Diagnóstico DGA - Duval (Triángulos y Pentágonos)")
 st.markdown(
-    "<div style='text-align:right; font-weight:bold; color:#00AEEF; letter-spacing:4px;'>VOLTIUM</div>",
+    "<div style='text-align:right; font-weight:bold; color:#00AEEF; letter-spacing:4px;font-size:30px; margin-bottom:1px;'>VOLTIUM</div>",
     unsafe_allow_html=True,
 )
-st.markdown("---")
+st.markdown(
+    "<hr style='margin-top: 2px; margin-bottom: 10px; border: 1px solid #ddd;'>",
+    unsafe_allow_html=True
+)
 
 # --- LÓGICA MATEMÁTICA (Del archivo original + Adaptaciones) ---
 
@@ -974,6 +977,31 @@ else:
     if total_slider > 0 and abs(total_slider - 100) > 1:
         f = 100.0 / total_slider
         pct_h2, pct_c2h6, pct_ch4, pct_c2h4, pct_c2h2 = pct_h2*f, pct_c2h6*f, pct_ch4*f, pct_c2h4*f, pct_c2h2*f
+
+# --- SECCIÓN DE REDES SOCIALES ---
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 🌐 Síguenos en Nuestras Redes")
+st.sidebar.markdown("""
+<div style='text-align: center; display: flex; justify-content: center; gap: 12px; margin: 15px 0;'>
+    <a href='https://www.linkedin.com/company/voltium-capacitacion' target='_blank' style='text-decoration: none;'>
+        <img src='https://img.icons8.com/color/96/linkedin.png' alt='LinkedIn' width='40' height='40' style='transition: transform 0.2s;' onmouseover='this.style.transform="scale(1.15)"' onmouseout='this.style.transform="scale(1)"'/>
+    </a>    
+    <a href='https://www.facebook.com/voltium.capacitacion' target='_blank' style='text-decoration: none;'>
+        <img src='https://img.icons8.com/color/96/facebook-new.png' alt='Facebook' width='40' height='40' style='transition: transform 0.2s;' onmouseover='this.style.transform="scale(1.15)"' onmouseout='this.style.transform="scale(1)"'/>
+    </a>
+    <a href='https://www.tiktok.com/@voltium_cea' target='_blank' style='text-decoration: none;'>
+        <img src='https://img.icons8.com/color/96/tiktok--v1.png' alt='TikTok' width='40' height='40' style='transition: transform 0.2s;' onmouseover='this.style.transform="scale(1.15)"' onmouseout='this.style.transform="scale(1)"'/>
+    </a>
+    <a href='https://www.youtube.com/@Voltium-Capacitaci%C3%B3nEl%C3%A9ctrica' target='_blank' style='text-decoration: none;'>
+        <img src='https://img.icons8.com/color/96/youtube-play.png' alt='YouTube' width='40' height='40' style='transition: transform 0.2s;' onmouseover='this.style.transform="scale(1.15)"' onmouseout='this.style.transform="scale(1)"'/>
+    </a>
+</div>
+""", unsafe_allow_html=True)
+st.sidebar.markdown(
+    "<p style='font-size: 15px; text-align: center; color: gray; margin-top: 5px;'>"
+    "Voltium Capacitación Eléctrica Avanzada</p>",
+    unsafe_allow_html=True
+)
 
 # Clasificación según diagrama seleccionado
 if "Triángulo 1" in diagrama:
